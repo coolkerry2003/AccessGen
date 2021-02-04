@@ -2,6 +2,7 @@
 using ExcelDataReader;
 using System;
 using System.Collections.Generic;
+using System.Configuration;
 using System.Data;
 using System.Data.OleDb;
 using System.IO;
@@ -13,30 +14,37 @@ namespace AccessGen
 {
     class Program
     {
-        private static string mRootDir = @"D:\Tools\AccessGen\";
-        private static string mSrcDir = Path.Combine(mRootDir, "Src");
-        private static string mOutDir = Path.Combine(mRootDir, "Output");
-        private static string mDataSource = Path.Combine(mOutDir, "LIS.mdb");
+        private static string mRootDir = ConfigurationSettings.AppSettings["mRootDir"].ToString();
+        private static string mSrcDir = Path.Combine(mRootDir, ConfigurationSettings.AppSettings["mSrcDir"].ToString());
+        private static string mOutDir = Path.Combine(mRootDir, ConfigurationSettings.AppSettings["mOutDir"].ToString());
+        private static string mDataSource = Path.Combine(mOutDir, ConfigurationSettings.AppSettings["mDataSource"].ToString());
         private static StreamWriter pLogFile;
         static void Main(string[] args)
         {
             try
             {
-                if (!Directory.Exists(mOutDir))
-                    Directory.CreateDirectory(mOutDir);
+                Directory.CreateDirectory(mOutDir);
                 if (Directory.Exists(mSrcDir))
                 {
                     OpenLogFile();
                     AccessGen aGen = new AccessGen();
                     if (aGen.Create(mDataSource))
-                        Console.Write("建立資料庫成功！\n");
+                    {
+                        aGen.Open();
+                        ReadExcel(aGen);
+                    }
                     else
+                    {
                         Console.Write("失敗\n");
-
-                    aGen.Open();
-                    ReadExcel(aGen);
+                        WriteLog(aGen.GetLastError(), true);
+                    }
+                    
                     aGen.Close();
                     CloseLogFile();
+                }
+                else
+                {
+                    Console.Write("來源資料不存在\n");
                 }
             }
             catch (Exception ex)
@@ -60,10 +68,9 @@ namespace AccessGen
                 string mPath = mPaths[i];
                 string mFileName = Path.GetFileNameWithoutExtension(mPath);
                 ExcelRead mER = new ExcelRead(mPath);
+                //取得Excel資料
                 mER.GetDataSet();
-                if (mER.mCols.Count <= 0)
-                    continue;
-
+                if (mER.mCols.Count <= 0) continue;
                 //篩選欄位
                 List<string> Cols = new List<string>();
                 foreach (object col in mER.mCols)
@@ -76,37 +83,46 @@ namespace AccessGen
                 string mSQL = string.Join(",", Cols);
                 Console.Write("建立資料表中...");
                 if (aGen.CreateTable(mTName, mSQL))
-                    Console.Write("成功！\n");
-                else
-                    Console.Write("失敗！\n");
-
-                for (int j = 0; j < mER.mDataRows.Count; j++)
                 {
-                    DataRowCollection mDataRowC = mER.mDataRows[j];
-                    for (int k = 0; k < mDataRowC.Count; k++)
+                    Console.Write("成功！\n");
+                    //依據表單建立資料
+                    for (int j = 0; j < mER.mDataRows.Count; j++)
                     {
-                        Console.Write(string.Format("[{0}/{1}] > ",i+1, mPaths.Length));
-                        Console.Write(string.Format("輸入第{0}/{1}張表 > [{2}] > ", j + 1, mER.mDataRows.Count, mTName));
-                        Console.Write(string.Format("輸入資料{0}/{1}...進度{2}%...", k + 1, mDataRowC.Count, Math.Round((double)k * 100 / (double)mDataRowC.Count, 1, MidpointRounding.AwayFromZero)));
-
-                        DataRow mDataRow = mDataRowC[k];
-                        //篩選資料
-                        List<string> Rows = new List<string>();
-                        foreach (object row in mDataRow.ItemArray.ToList())
+                        DataRowCollection mDataRowC = mER.mDataRows[j];
+                        for (int k = 0; k < mDataRowC.Count; k++)
                         {
-                            string str = row.ToString().Replace("\'", "");//替換特殊字元
-                            Rows.Add(string.Format("\'{0}\'", str));
+                            Console.Write($"[{i + 1}/{mPaths.Length}] > ");
+                            Console.Write($"[{mTName}] > 輸入第{j + 1}/{mER.mDataRows.Count}張表 > ");
+                            Console.Write($"輸入資料{k + 1}/{mDataRowC.Count}...進度{Math.Round((double)k * 100 / (double)mDataRowC.Count, 1, MidpointRounding.AwayFromZero)}%...");
+
+                            //篩選資料
+                            List<string> Rows = new List<string>();
+                            DataRow mDataRow = mDataRowC[k];
+                            foreach (object row in mDataRow.ItemArray.ToList())
+                            {
+                                string str = row.ToString().Replace("\'", "");//替換特殊字元
+                                Rows.Add(string.Format("\'{0}\'", str));
+                            }
+
+                            //輸入資料
+                            string aInsetSQL = string.Format("INSERT INTO {0} VALUES ({1})", mTName, string.Join(",", Rows));
+                            if (aGen.ExecuteNonQuery(aInsetSQL))
+                                Console.Write("成功\n");
+                            else
+                            {
+                                Console.Write("失敗\n");
+                                WriteLog(aGen.GetLastError(), true);
+                            }
                         }
-                        //輸入資料
-                        string aInsetSQL = string.Format("INSERT INTO {0} VALUES ({1})", mTName, string.Join(",", Rows));
-                        if (aGen.ExecuteNonQuery(aInsetSQL))
-                            Console.Write("成功\n");
-                        else
-                            Console.Write("失敗\n");
                     }
                 }
+                else
+                {
+                    Console.Write("失敗！\n");
+                    WriteLog(aGen.GetLastError(), true);
+                }
             }
-            Console.Write("完成！\n");
+            Console.Write($"資料庫建置完成！\n");
         }
         /// <summary>
         /// 開啟Log檔案
@@ -148,10 +164,11 @@ namespace AccessGen
         OleDbTransaction mTrans;
         string m_ConnStr = "Provider=Microsoft.Jet.OLEDB.4.0;Data Source={0};Jet OLEDB:Engine Type=5";
         string mErrorMsg = string.Empty;
-        public AccessGen()
-        {
-
-        }
+        /// <summary>
+        /// 建立資料庫
+        /// </summary>
+        /// <param name="aDataSource"></param>
+        /// <returns></returns>
         public bool Create(string aDataSource)
         {
             bool success = false;
@@ -181,7 +198,7 @@ namespace AccessGen
                         case "N":
                             m_ConnStr = string.Format(m_ConnStr, aDataSource);
                             mConn.ConnectionString = m_ConnStr;
-                            return false;
+                            return true;
                             break;
                         default:
                             goto Back;
@@ -196,18 +213,30 @@ namespace AccessGen
             }
             return success;
         }
+        /// <summary>
+        /// 開啟資料庫
+        /// </summary>
         public void Open()
         {
             if(mConn.State != ConnectionState.Open)
                 mConn.Open();
         }
+        /// <summary>
+        /// 關閉資料庫
+        /// </summary>
         public void Close()
         {
             mConn.Close();
         }
+        /// <summary>
+        /// 建立資料表
+        /// </summary>
+        /// <param name="aTName"></param>
+        /// <param name="aSQL"></param>
+        /// <returns></returns>
         public bool CreateTable(string aTName,string aSQL)
         {
-            bool success = false;
+            bool success = true;
             try
             {
                 if (!ExistTable(aTName))
@@ -229,6 +258,11 @@ namespace AccessGen
             }
             return success;
         }
+        /// <summary>
+        /// 檢核資料表是否存在
+        /// </summary>
+        /// <param name="_Table"></param>
+        /// <returns></returns>
         public bool ExistTable(string _Table)
         {
             bool success = false;
@@ -243,6 +277,11 @@ namespace AccessGen
             }
             return success;
         }
+        /// <summary>
+        /// 執行SQL語法
+        /// </summary>
+        /// <param name="SQLStr"></param>
+        /// <returns></returns>
         public bool ExecuteNonQuery(string SQLStr)
         {
             bool success = false;
@@ -264,6 +303,11 @@ namespace AccessGen
             }
             return success;
         }
+        /// <summary>
+        /// 執行SQL語法
+        /// </summary>
+        /// <param name="SQLStr"></param>
+        /// <returns></returns>
         public OleDbDataReader ExecuteQuery(string SQLStr)
         {
             OleDbDataReader Rtn = null;
@@ -279,6 +323,14 @@ namespace AccessGen
             }
             return Rtn;
         }
+        /// <summary>
+        /// 取得最後錯誤紀錄
+        /// </summary>
+        /// <returns></returns>
+        public string GetLastError()
+        {
+            return mErrorMsg;
+        }
     }
     class ExcelRead
     {
@@ -290,6 +342,9 @@ namespace AccessGen
         {
             mPath = aPath;
         }
+        /// <summary>
+        /// 取得Excel資料內容
+        /// </summary>
         public void GetDataSet()
         {
             try
