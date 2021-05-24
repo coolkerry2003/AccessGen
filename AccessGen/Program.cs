@@ -494,7 +494,7 @@ namespace AccessGen
                     DAO.TableDef t1 = mDB.CreateTableDef(aTName);
                     foreach (string col in aCols)
                     {
-                        DAO.Field f1 = t1.CreateField(col, DAO.DataTypeEnum.dbText);
+                        DAO.Field f1 = t1.CreateField(col, DAO.DataTypeEnum.dbMemo);
                         t1.Fields.Append(f1);
                     }
                     mDB.TableDefs.Append(t1);
