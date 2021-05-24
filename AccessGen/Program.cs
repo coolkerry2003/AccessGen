@@ -42,7 +42,7 @@ namespace AccessGen
                     else
                     {
                         Console.Write("失敗\n");
-                        WriteLog(aGen.GetLastError(), true);
+                        WriteLog(aGen.GetLastError() + "\n", true);
                     }
 
                     WriteLog(string.Format("花費：{0}分", sw.Elapsed.TotalMinutes.ToString()), true);
@@ -188,7 +188,7 @@ namespace AccessGen
                             //輸入資料
                             if (!aGen.Insert(mRs, mFields, Rows))
                             {
-                                WriteLog(aGen.GetLastError(), true);
+                                WriteLog(aGen.GetLastError() + "\n", true);
                             }
                         }
                     }
@@ -203,7 +203,7 @@ namespace AccessGen
                 else
                 {
                     Console.Write("失敗！\n");
-                    WriteLog(aGen.GetLastError(), true);
+                    WriteLog(aGen.GetLastError() + "\n", true);
                 }
             }
             Console.Write($"資料庫建置完成！\n");
