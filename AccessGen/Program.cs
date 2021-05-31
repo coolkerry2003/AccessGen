@@ -19,8 +19,12 @@ namespace AccessGen
         private static string mRootDir = ConfigurationSettings.AppSettings["mRootDir"].ToString();
         private static string mSrcDir = Path.Combine(mRootDir, ConfigurationSettings.AppSettings["mSrcDir"].ToString());
         private static string mOutDir = Path.Combine(mRootDir, ConfigurationSettings.AppSettings["mOutDir"].ToString());
-        private static string mDataSource = Path.Combine(mOutDir, ConfigurationSettings.AppSettings["mDataSource"].ToString());
+        private static string mDataName = ConfigurationSettings.AppSettings["mDataName"].ToString();
+        private static string mExt = ConfigurationSettings.AppSettings["mExt"].ToString();
+        //private static string mDataSource = Path.Combine(mOutDir, ConfigurationSettings.AppSettings["mDataSource"].ToString());
         private static StreamWriter pLogFile;
+        private const double mDBMaxLength_GB = 2;
+        private const double mGB = 1024 * 1024 * 1024;
         static void Main(string[] args)
         {
             try
@@ -33,17 +37,45 @@ namespace AccessGen
                     sw.Restart();
                     sw.Start();
 
+                    string[] mPaths = Directory.GetFiles(mSrcDir, "*.xls");
+                    Console.Write(string.Format("共{0}份檔案，開始將Excel資料匯入至DB...\n", mPaths.Length));
+                    int fileindex = 1;
                     DAOGen aGen = new DAOGen();
-                    if (aGen.Create(mDataSource))
+                    for (int i = 0; i < mPaths.Length; i++)
                     {
-                        //aGen.Open();
-                        ReadExcel(aGen);
+                        string mPath = mPaths[i];
+                        string mFileName = Path.GetFileNameWithoutExtension(mPath);
+                        FileInfo mFile = new FileInfo(mPath);
+
+                        string mDataSource = Path.Combine(mOutDir, $"{mDataName}_{fileindex.ToString().PadLeft(3, '0')}{mExt}");
+                        if (!File.Exists(mDataSource))
+                        {
+                            aGen.Create(mDataSource);
+                        }
+                        else
+                        {
+                            FileInfo mDBFile = new FileInfo(mDataSource);
+                            if ((mDBFile.Length + (mFile.Length * 2)) > mDBMaxLength_GB * mGB)
+                            {
+                                mDataSource = Path.Combine(mOutDir, $"{mDataName}_{(++fileindex).ToString().PadLeft(3, '0')}{mExt}");
+                                aGen.Close();
+                                aGen.Create(mDataSource);
+                            }
+                        }
+                        ReadExcel(aGen, mPath);
                     }
-                    else
-                    {
-                        Console.Write("失敗\n");
-                        WriteLog(aGen.GetLastError() + "\n", true);
-                    }
+
+                    //DAOGen aGen = new DAOGen();
+                    //if (aGen.Create(mDataSource))
+                    //{
+                    //    //aGen.Open();
+                    //    ReadExcel(aGen);
+                    //}
+                    //else
+                    //{
+                    //    Console.Write("失敗\n");
+                    //    WriteLog(aGen.GetLastError() + "\n", true);
+                    //}
 
                     WriteLog(string.Format("花費：{0}分", sw.Elapsed.TotalMinutes.ToString()), true);
                     aGen.Close();
@@ -209,6 +241,73 @@ namespace AccessGen
             Console.Write($"資料庫建置完成！\n");
         }
         /// <summary>
+        /// 讀取Excel
+        /// 2003舊版xls檔案
+        /// </summary>
+        /// <param name="aGen"></param>
+        /// <param name="aPath"></param>
+        public static void ReadExcel(DAOGen aGen, string aPath)
+        {
+            string mFileName = Path.GetFileNameWithoutExtension(aPath);
+            ExcelRead mER = new ExcelRead(aPath);
+            //取得Excel資料
+            mER.GetDataSet();
+            if (mER.mCols.Count <= 0) return;
+            //篩選欄位
+            List<string> Cols = new List<string>();
+            foreach (object col in mER.mCols)
+            {
+                string str = col.ToString().Replace("\'", "");//替換特殊字元
+                Cols.Add(str);
+            }
+            //建立資料表
+            string mTName = mFileName;
+            DAO.Recordset mRs = null;
+            DAO.Field[] mFields = null;
+            Console.Write("建立資料表中...");
+            if (aGen.CreateTable(mTName, Cols.ToArray()) && aGen.OpenTable(mTName, Cols.ToArray(), ref mRs, ref mFields))
+            {
+                Console.Write("成功！\n");
+
+                Console.Write("建立欄位資料中...");
+                //依據表單建立資料
+                for (int j = 0; j < mER.mDataRows.Count; j++)
+                {
+                    DataRowCollection mDataRowC = mER.mDataRows[j];
+                    for (int k = 0; k < mDataRowC.Count; k++)
+                    {
+                        //篩選資料
+                        List<string> Rows = new List<string>();
+                        DataRow mDataRow = mDataRowC[k];
+                        foreach (object row in mDataRow.ItemArray.ToList())
+                        {
+                            string str = row.ToString().Replace("\'", "");//替換特殊字元
+                            str = string.IsNullOrEmpty(str) ? " " : str;
+                            Rows.Add(str);
+                        }
+
+                        //輸入資料
+                        if (!aGen.Insert(mRs, mFields, Rows))
+                        {
+                            WriteLog(aGen.GetLastError() + "\n", true);
+                        }
+                    }
+                }
+
+                //關閉資料表
+                if (mRs != null)
+                {
+                    mRs.Close();
+                }
+                Console.Write("成功！\n");
+            }
+            else
+            {
+                Console.Write("失敗！\n");
+                WriteLog(aGen.GetLastError() + "\n", true);
+            }
+        }
+        /// <summary>
         /// 開啟Log檔案
         /// </summary>
         public static void OpenLogFile()
@@ -278,15 +377,12 @@ namespace AccessGen
                         case "Y":
                             File.Delete(aDataSource);
                             goto Begin;
-                            break;
                         case "N":
                             m_ConnStr = string.Format(m_ConnStr, aDataSource);
                             mConn.ConnectionString = m_ConnStr;
                             return true;
-                            break;
                         default:
                             goto Back;
-                            break;
                     }
                 }
             }
@@ -450,15 +546,12 @@ namespace AccessGen
                         case "Y":
                             File.Delete(aDataSource);
                             goto Begin;
-                            break;
                         case "N":
                             DAO.DBEngine dbEngine = new DAO.DBEngine();
                             mDB = dbEngine.OpenDatabase(aDataSource);
                             return true;
-                            break;
                         default:
                             goto Back;
-                            break;
                     }
                 }
             }
