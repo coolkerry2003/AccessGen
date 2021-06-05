@@ -21,7 +21,6 @@ namespace AccessGen
         private static string mOutDir = Path.Combine(mRootDir, ConfigurationSettings.AppSettings["mOutDir"].ToString());
         private static string mDataName = ConfigurationSettings.AppSettings["mDataName"].ToString();
         private static string mExt = ConfigurationSettings.AppSettings["mExt"].ToString();
-        //private static string mDataSource = Path.Combine(mOutDir, ConfigurationSettings.AppSettings["mDataSource"].ToString());
         private static StreamWriter pLogFile;
         private const double mDBMaxLength_GB = 2;
         private const double mGB = 1024 * 1024 * 1024;
@@ -48,7 +47,7 @@ namespace AccessGen
                         FileInfo mFile = new FileInfo(mPath);
 
                         string mDataSource = Path.Combine(mOutDir, $"{mDataName}_{fileindex.ToString().PadLeft(3, '0')}{mExt}");
-                        if (!File.Exists(mDataSource))
+                        if(!aGen.isOpen())
                         {
                             aGen.Create(mDataSource);
                         }
@@ -65,19 +64,7 @@ namespace AccessGen
                         ReadExcel(aGen, mPath);
                     }
 
-                    //DAOGen aGen = new DAOGen();
-                    //if (aGen.Create(mDataSource))
-                    //{
-                    //    //aGen.Open();
-                    //    ReadExcel(aGen);
-                    //}
-                    //else
-                    //{
-                    //    Console.Write("失敗\n");
-                    //    WriteLog(aGen.GetLastError() + "\n", true);
-                    //}
-
-                    WriteLog(string.Format("花費：{0}分", sw.Elapsed.TotalMinutes.ToString()), true);
+                    WriteLog(string.Format("花費：{0}分", sw.Elapsed.TotalMinutes.ToString("0.00")), true);
                     aGen.Close();
                     CloseLogFile();
                 }
@@ -570,6 +557,7 @@ namespace AccessGen
             if (mDB != null)
             {
                 mDB.Close();
+                mDB = null;
             }
         }
         /// <summary>
@@ -671,6 +659,14 @@ namespace AccessGen
                 success = false;
             }
             return success;
+        }
+        /// <summary>
+        /// 判斷資料庫是否開啟
+        /// </summary>
+        /// <returns></returns>
+        public bool isOpen()
+        {
+            return mDB != null;
         }
         /// <summary>
         /// 取得最後錯誤紀錄
